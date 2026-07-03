@@ -1,5 +1,6 @@
 package com.ascentium.kyc.controller;
 
+import com.ascentium.kyc.dto.AuditDtos.AuditLogResponse;
 import com.ascentium.kyc.dto.DashboardDtos.DashboardResponse;
 import com.ascentium.kyc.dto.KycDtos.ApproveRequest;
 import com.ascentium.kyc.dto.KycDtos.KycResponse;
@@ -37,6 +38,12 @@ public class ComplianceController {
     @GetMapping("/{id}")
     public ResponseEntity<KycResponse> getOne(@PathVariable Long id) {
         return ResponseEntity.ok(kycService.getById(id));
+    }
+
+    @GetMapping("/{id}/audit")
+    public ResponseEntity<List<AuditLogResponse>> auditTrail(@AuthenticationPrincipal AppUserPrincipal principal,
+                                                             @PathVariable Long id) {
+        return ResponseEntity.ok(kycService.getAuditTrailAsCompliance(principal.getUser(), id));
     }
 
     @PostMapping("/{id}/accept")

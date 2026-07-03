@@ -1,0 +1,13 @@
+package com.ascentium.kyc.entity;
+
+public enum AuditAction {
+    DRAFT_CREATED,
+    DRAFT_UPDATED,
+    SUBMITTED,
+    RESUBMITTED,
+    REVIEWER_APPROVED,
+    REVIEWER_REJECTED,
+    COMPLIANCE_APPROVED,
+    COMPLIANCE_REJECTED,
+    RISK_TIER_OVERRIDDEN
+}

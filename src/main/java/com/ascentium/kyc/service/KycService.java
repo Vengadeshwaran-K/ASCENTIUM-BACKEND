@@ -1,10 +1,12 @@
 package com.ascentium.kyc.service;
 
+import com.ascentium.kyc.dto.AuditDtos.AuditLogResponse;
 import com.ascentium.kyc.dto.DashboardDtos.DashboardResponse;
 import com.ascentium.kyc.dto.DashboardDtos.DashboardSection;
 import com.ascentium.kyc.dto.KycDtos.BeneficialOwnerDto;
 import com.ascentium.kyc.dto.KycDtos.KycResponse;
 import com.ascentium.kyc.dto.KycDtos.KycUpsertRequest;
+import com.ascentium.kyc.entity.AuditAction;
 import com.ascentium.kyc.entity.BeneficialOwner;
 import com.ascentium.kyc.entity.KycRequest;
 import com.ascentium.kyc.entity.KycStatus;
@@ -41,6 +43,7 @@ public class KycService {
     private final KycRequestRepository kycRequestRepository;
     private final UserMappingRepository userMappingRepository;
     private final NotificationService notificationService;
+    private final AuditService auditService;
 
     // ---------- Client: draft lifecycle ----------
 
@@ -55,7 +58,9 @@ public class KycService {
                 .status(KycStatus.DRAFT)
                 .build();
         applyFields(kyc, request);
-        return KycResponse.from(kycRequestRepository.save(kyc));
+        KycRequest saved = kycRequestRepository.save(kyc);
+        auditService.record(saved, client, AuditAction.DRAFT_CREATED, null);
+        return KycResponse.from(saved);
     }
 
     @Transactional
@@ -64,7 +69,9 @@ public class KycService {
         requireEditable(kyc);
         kyc.setType(request.type());
         applyFields(kyc, request);
-        return KycResponse.from(kycRequestRepository.save(kyc));
+        KycRequest saved = kycRequestRepository.save(kyc);
+        auditService.record(saved, client, AuditAction.DRAFT_UPDATED, null);
+        return KycResponse.from(saved);
     }
 
     /**
@@ -109,10 +116,13 @@ public class KycService {
             notificationService.notify(reviewer, NotificationType.DOCUMENTS_RESUBMITTED,
                     client.getFullName() + " resubmitted KYC request #" + saved.getId() + " after corrections.",
                     saved);
+            auditService.record(saved, client, AuditAction.RESUBMITTED,
+                    "Resubmitted after corrections (form version " + saved.getFormVersion() + ")");
         } else {
             notificationService.notify(reviewer, NotificationType.KYC_SUBMITTED,
                     "New KYC submission from " + client.getFullName() + " (request #" + saved.getId() + ").",
                     saved);
+            auditService.record(saved, client, AuditAction.SUBMITTED, null);
         }
         return KycResponse.from(saved);
     }
@@ -159,6 +169,7 @@ public class KycService {
         notificationService.notify(saved.getClient(), NotificationType.REQUEST_APPROVED,
                 "Your KYC request #" + saved.getId() + " passed reviewer check and is pending compliance approval.",
                 saved);
+        auditService.record(saved, reviewer, AuditAction.REVIEWER_APPROVED, comment);
         return KycResponse.from(saved);
     }
 
@@ -173,6 +184,7 @@ public class KycService {
 
         notificationService.notify(saved.getClient(), NotificationType.ADDITIONAL_DOCUMENTS_REQUESTED,
                 "Additional documents/corrections requested on KYC request #" + saved.getId() + ": " + reason, saved);
+        auditService.record(saved, reviewer, AuditAction.REVIEWER_REJECTED, reason);
         return KycResponse.from(saved);
     }
 
@@ -204,6 +216,7 @@ public class KycService {
         notificationService.notify(mapping.getReviewer(), NotificationType.REQUEST_APPROVED,
                 "Compliance approved KYC request #" + saved.getId() + " for " + saved.getClient().getFullName() + ".",
                 saved);
+        auditService.record(saved, complianceOfficer, AuditAction.COMPLIANCE_APPROVED, comment);
         return KycResponse.from(saved);
     }
 
@@ -219,6 +232,7 @@ public class KycService {
         UserMapping mapping = requireMapping(saved);
         notificationService.notify(mapping.getReviewer(), NotificationType.REQUEST_REJECTED,
                 "Compliance rejected KYC request #" + saved.getId() + "; please re-review. Reason: " + reason, saved);
+        auditService.record(saved, complianceOfficer, AuditAction.COMPLIANCE_REJECTED, reason);
         return KycResponse.from(saved);
     }
 
@@ -230,6 +244,7 @@ public class KycService {
         if (!mapping.getComplianceOfficer().getId().equals(complianceOfficer.getId())) {
             throw new BusinessException("This request's client is not assigned to you");
         }
+        RiskTier previous = kyc.getRiskTier();
         kyc.setRiskTier(riskTier);
         kyc.setRiskTierUpdatedAt(Instant.now());
         KycRequest saved = kycRequestRepository.save(kyc);
@@ -238,6 +253,9 @@ public class KycService {
                 "Compliance set risk tier to " + riskTier + " for KYC request #" + saved.getId()
                         + " (" + saved.getClient().getFullName() + ").",
                 saved);
+        auditService.record(saved, complianceOfficer, AuditAction.RISK_TIER_OVERRIDDEN,
+                "Risk tier changed from " + (previous != null ? previous : "UNRATED") + " to " + riskTier,
+                previous, riskTier);
         return KycResponse.from(saved);
     }
 
@@ -251,6 +269,35 @@ public class KycService {
     @Transactional(readOnly = true)
     public KycResponse getById(Long kycId) {
         return KycResponse.from(getKyc(kycId));
+    }
+
+    // ---------- Audit trail (read-only; scoping mirrors who may act on the request) ----------
+
+    /** ADMIN: any request's trail. */
+    @Transactional(readOnly = true)
+    public List<AuditLogResponse> getAuditTrailAsAdmin(Long kycId) {
+        getKyc(kycId);
+        return auditService.getTrail(kycId);
+    }
+
+    /** REVIEWER: only requests whose client is mapped to them. */
+    @Transactional(readOnly = true)
+    public List<AuditLogResponse> getAuditTrailAsReviewer(User reviewer, Long kycId) {
+        KycRequest kyc = getKyc(kycId);
+        if (!requireMapping(kyc).getReviewer().getId().equals(reviewer.getId())) {
+            throw new BusinessException("This request's client is not assigned to you");
+        }
+        return auditService.getTrail(kycId);
+    }
+
+    /** COMPLIANCE_OFFICER: only requests whose client is mapped to them. */
+    @Transactional(readOnly = true)
+    public List<AuditLogResponse> getAuditTrailAsCompliance(User complianceOfficer, Long kycId) {
+        KycRequest kyc = getKyc(kycId);
+        if (!requireMapping(kyc).getComplianceOfficer().getId().equals(complianceOfficer.getId())) {
+            throw new BusinessException("This request's client is not assigned to you");
+        }
+        return auditService.getTrail(kycId);
     }
 
     // ---------- Dashboard (one method per role, one endpoint per role) ----------

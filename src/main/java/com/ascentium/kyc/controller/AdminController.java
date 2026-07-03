@@ -1,5 +1,6 @@
 package com.ascentium.kyc.controller;
 
+import com.ascentium.kyc.dto.AuditDtos.AuditLogResponse;
 import com.ascentium.kyc.dto.AuthDtos.CreateUserRequest;
 import com.ascentium.kyc.dto.DashboardDtos.DashboardResponse;
 import com.ascentium.kyc.dto.KycDtos.KycResponse;
@@ -59,6 +60,11 @@ public class AdminController {
     @GetMapping("/kyc")
     public ResponseEntity<List<KycResponse>> getAllKyc() {
         return ResponseEntity.ok(kycService.getAll());
+    }
+
+    @GetMapping("/kyc/{id}/audit")
+    public ResponseEntity<List<AuditLogResponse>> auditTrail(@PathVariable Long id) {
+        return ResponseEntity.ok(kycService.getAuditTrailAsAdmin(id));
     }
 
 
