@@ -9,6 +9,8 @@ import com.ascentium.kyc.entity.BeneficialOwner;
 import com.ascentium.kyc.entity.KycRequest;
 import com.ascentium.kyc.entity.KycStatus;
 import com.ascentium.kyc.entity.KycType;
+import com.ascentium.kyc.entity.NotificationType;
+import com.ascentium.kyc.entity.RiskTier;
 import com.ascentium.kyc.entity.Role;
 import com.ascentium.kyc.entity.User;
 import com.ascentium.kyc.entity.UserMapping;
@@ -38,6 +40,7 @@ public class KycService {
 
     private final KycRequestRepository kycRequestRepository;
     private final UserMappingRepository userMappingRepository;
+    private final NotificationService notificationService;
 
     // ---------- Client: draft lifecycle ----------
 
@@ -99,7 +102,19 @@ public class KycService {
         kyc.setReviewedAt(null);
         kyc.setComplianceComment(null);
         kyc.setDecidedAt(null);
-        return KycResponse.from(kycRequestRepository.save(kyc));
+        KycRequest saved = kycRequestRepository.save(kyc);
+
+        User reviewer = requireMapping(saved).getReviewer();
+        if (isCorrection) {
+            notificationService.notify(reviewer, NotificationType.DOCUMENTS_RESUBMITTED,
+                    client.getFullName() + " resubmitted KYC request #" + saved.getId() + " after corrections.",
+                    saved);
+        } else {
+            notificationService.notify(reviewer, NotificationType.KYC_SUBMITTED,
+                    "New KYC submission from " + client.getFullName() + " (request #" + saved.getId() + ").",
+                    saved);
+        }
+        return KycResponse.from(saved);
     }
 
     @Transactional(readOnly = true)
@@ -136,7 +151,15 @@ public class KycService {
         kyc.setStatus(KycStatus.PENDING_COMPLIANCE);
         kyc.setRejectedBy(null);
         kyc.setRejectionReason(null);
-        return KycResponse.from(kycRequestRepository.save(kyc));
+        KycRequest saved = kycRequestRepository.save(kyc);
+
+        UserMapping mapping = requireMapping(saved);
+        notificationService.notify(mapping.getComplianceOfficer(), NotificationType.REQUEST_APPROVED,
+                "Reviewer approved KYC request #" + saved.getId() + "; now pending compliance decision.", saved);
+        notificationService.notify(saved.getClient(), NotificationType.REQUEST_APPROVED,
+                "Your KYC request #" + saved.getId() + " passed reviewer check and is pending compliance approval.",
+                saved);
+        return KycResponse.from(saved);
     }
 
     /** Reject: mandatory reason, form goes back to the client to fix and resubmit. */
@@ -146,7 +169,11 @@ public class KycService {
         kyc.setReviewerComment(reason);
         kyc.setReviewedAt(Instant.now());
         reject(kyc, Role.REVIEWER, KycStatus.RESUBMISSION_REQUIRED, reason);
-        return KycResponse.from(kycRequestRepository.save(kyc));
+        KycRequest saved = kycRequestRepository.save(kyc);
+
+        notificationService.notify(saved.getClient(), NotificationType.ADDITIONAL_DOCUMENTS_REQUESTED,
+                "Additional documents/corrections requested on KYC request #" + saved.getId() + ": " + reason, saved);
+        return KycResponse.from(saved);
     }
 
     // ---------- Compliance Officer ----------
@@ -169,7 +196,15 @@ public class KycService {
         kyc.setStatus(KycStatus.APPROVED);
         kyc.setRejectedBy(null);
         kyc.setRejectionReason(null);
-        return KycResponse.from(kycRequestRepository.save(kyc));
+        KycRequest saved = kycRequestRepository.save(kyc);
+
+        UserMapping mapping = requireMapping(saved);
+        notificationService.notify(saved.getClient(), NotificationType.REQUEST_APPROVED,
+                "Your KYC request #" + saved.getId() + " has been approved.", saved);
+        notificationService.notify(mapping.getReviewer(), NotificationType.REQUEST_APPROVED,
+                "Compliance approved KYC request #" + saved.getId() + " for " + saved.getClient().getFullName() + ".",
+                saved);
+        return KycResponse.from(saved);
     }
 
     /** Reject: mandatory reason, form goes back to the reviewer (the previous stage) to re-decide. */
@@ -179,7 +214,31 @@ public class KycService {
         kyc.setComplianceComment(reason);
         kyc.setDecidedAt(Instant.now());
         reject(kyc, Role.COMPLIANCE_OFFICER, KycStatus.RETURNED_TO_REVIEWER, reason);
-        return KycResponse.from(kycRequestRepository.save(kyc));
+        KycRequest saved = kycRequestRepository.save(kyc);
+
+        UserMapping mapping = requireMapping(saved);
+        notificationService.notify(mapping.getReviewer(), NotificationType.REQUEST_REJECTED,
+                "Compliance rejected KYC request #" + saved.getId() + "; please re-review. Reason: " + reason, saved);
+        return KycResponse.from(saved);
+    }
+
+    /** Compliance officer overrides the risk tier for a request they're assigned to, at any stage. */
+    @Transactional
+    public KycResponse setRiskTier(User complianceOfficer, Long kycId, RiskTier riskTier) {
+        KycRequest kyc = getKyc(kycId);
+        UserMapping mapping = requireMapping(kyc);
+        if (!mapping.getComplianceOfficer().getId().equals(complianceOfficer.getId())) {
+            throw new BusinessException("This request's client is not assigned to you");
+        }
+        kyc.setRiskTier(riskTier);
+        kyc.setRiskTierUpdatedAt(Instant.now());
+        KycRequest saved = kycRequestRepository.save(kyc);
+
+        notificationService.notify(mapping.getReviewer(), NotificationType.RISK_TIER_OVERRIDDEN,
+                "Compliance set risk tier to " + riskTier + " for KYC request #" + saved.getId()
+                        + " (" + saved.getClient().getFullName() + ").",
+                saved);
+        return KycResponse.from(saved);
     }
 
     // ---------- Shared ----------

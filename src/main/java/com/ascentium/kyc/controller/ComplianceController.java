@@ -4,6 +4,7 @@ import com.ascentium.kyc.dto.DashboardDtos.DashboardResponse;
 import com.ascentium.kyc.dto.KycDtos.ApproveRequest;
 import com.ascentium.kyc.dto.KycDtos.KycResponse;
 import com.ascentium.kyc.dto.KycDtos.RejectRequest;
+import com.ascentium.kyc.dto.KycDtos.RiskTierRequest;
 import com.ascentium.kyc.security.AppUserPrincipal;
 import com.ascentium.kyc.service.KycService;
 import jakarta.validation.Valid;
@@ -51,5 +52,12 @@ public class ComplianceController {
                                               @PathVariable Long id,
                                               @Valid @RequestBody RejectRequest request) {
         return ResponseEntity.ok(kycService.rejectCompliance(principal.getUser(), id, request.reason()));
+    }
+
+    @PatchMapping("/{id}/risk-tier")
+    public ResponseEntity<KycResponse> setRiskTier(@AuthenticationPrincipal AppUserPrincipal principal,
+                                                    @PathVariable Long id,
+                                                    @Valid @RequestBody RiskTierRequest request) {
+        return ResponseEntity.ok(kycService.setRiskTier(principal.getUser(), id, request.riskTier()));
     }
 }

@@ -2,6 +2,7 @@ package com.ascentium.kyc.service;
 
 import com.ascentium.kyc.dto.MappingDtos.UserMappingRequest;
 import com.ascentium.kyc.dto.MappingDtos.UserMappingResponse;
+import com.ascentium.kyc.entity.NotificationType;
 import com.ascentium.kyc.entity.Role;
 import com.ascentium.kyc.entity.User;
 import com.ascentium.kyc.entity.UserMapping;
@@ -21,6 +22,7 @@ public class UserMappingService {
 
     private final UserMappingRepository userMappingRepository;
     private final UserRepository userRepository;
+    private final NotificationService notificationService;
 
     @Transactional
     public UserMappingResponse createMapping(UserMappingRequest request) {
@@ -44,10 +46,21 @@ public class UserMappingService {
                 && userMappingRepository.existsByClientId(client.getId())) {
             throw new BusinessException("Client already has a mapping; update it instead");
         }
+        User previousReviewer = mapping.getReviewer();
+        User newReviewer = requireUser(request.reviewerId(), Role.REVIEWER);
+
         mapping.setClient(client);
-        mapping.setReviewer(requireUser(request.reviewerId(), Role.REVIEWER));
+        mapping.setReviewer(newReviewer);
         mapping.setComplianceOfficer(requireUser(request.complianceOfficerId(), Role.COMPLIANCE_OFFICER));
-        return UserMappingResponse.from(userMappingRepository.save(mapping));
+        UserMapping saved = userMappingRepository.save(mapping);
+
+        if (!previousReviewer.getId().equals(newReviewer.getId())) {
+            notificationService.notify(newReviewer, NotificationType.REVIEWER_REASSIGNED,
+                    "You have been assigned as reviewer for " + client.getFullName() + "'s KYC case.", null);
+            notificationService.notify(client, NotificationType.REVIEWER_REASSIGNED,
+                    "Your KYC case has been reassigned to a new reviewer.", null);
+        }
+        return UserMappingResponse.from(saved);
     }
 
     @Transactional

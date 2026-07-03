@@ -1,0 +1,11 @@
+package com.ascentium.kyc.entity;
+
+public enum NotificationType {
+    KYC_SUBMITTED,
+    ADDITIONAL_DOCUMENTS_REQUESTED,
+    DOCUMENTS_RESUBMITTED,
+    REQUEST_APPROVED,
+    REQUEST_REJECTED,
+    RISK_TIER_OVERRIDDEN,
+    REVIEWER_REASSIGNED
+}

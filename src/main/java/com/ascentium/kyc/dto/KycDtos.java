@@ -4,6 +4,7 @@ import com.ascentium.kyc.entity.BeneficialOwner;
 import com.ascentium.kyc.entity.KycRequest;
 import com.ascentium.kyc.entity.KycStatus;
 import com.ascentium.kyc.entity.KycType;
+import com.ascentium.kyc.entity.RiskTier;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -55,6 +56,9 @@ public final class KycDtos {
             @NotBlank(message = "A valid reason is required when rejecting a request") String reason) {
     }
 
+    public record RiskTierRequest(@NotNull RiskTier riskTier) {
+    }
+
     public record KycResponse(
             Long id,
             Long clientId,
@@ -82,6 +86,8 @@ public final class KycDtos {
             Instant reviewedAt,
             String complianceComment,
             Instant decidedAt,
+            RiskTier riskTier,
+            Instant riskTierUpdatedAt,
             Instant createdAt) {
 
         public static KycResponse from(KycRequest kyc) {
@@ -109,6 +115,8 @@ public final class KycDtos {
                     kyc.getReviewedAt(),
                     kyc.getComplianceComment(),
                     kyc.getDecidedAt(),
+                    kyc.getRiskTier(),
+                    kyc.getRiskTierUpdatedAt(),
                     kyc.getCreatedAt());
         }
     }

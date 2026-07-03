@@ -80,6 +80,11 @@ public class KycRequest {
 
     private Instant decidedAt;
 
+    @Enumerated(EnumType.STRING)
+    private RiskTier riskTier;
+
+    private Instant riskTierUpdatedAt;
+
     @Builder.Default
     @Column(nullable = false, updatable = false)
     private Instant createdAt = Instant.now();
